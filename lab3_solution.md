@@ -627,3 +627,82 @@ def newget(query, primary_key):
 ```
 
 ## Exercise 9
+
+Description:
+
+```
+Add invariant checks to check-symex-zoobar.py to implement the above two rules (total balance preservation and no zoobar theft). Look for the comment Exercise 9: your code here to see where you should write this code. When you detect a zoobar balance mismatch, call the report_balance_mismatch() function. When you detect zoobar theft, call report_zoobar_theft().
+```
+
+This is an easy one..codes are shown below
+
+```python
+def test_stuff():
+    ## Detect balance mismatch.
+    ## When detected, call report_balance_mismatch()
+    balance2 = sum([p.zoobars for p in pdb.query(zoobar.zoodb.Person).all()])
+    if balance1 != balance2:
+        report_balance_mismatch()
+    ## Detect zoobar theft.
+    ## When detected, call report_zoobar_theft()
+    username_set = set()
+    for p in pdb.query(zoobar.zoodb.Person).all():
+        username_set.add(p.username)
+    for transfer in tdb.query(zoobar.zoodb.Transfer).all():
+        if transfer.sender in username_set:
+        username_set.remove(transfer.sender)
+    for username in username_set:
+        person = pdb.query(zoobar.zoodb.Person).get(username)
+        if person.zoobars < 10:
+        report_zoobar_theft()
+```
+
+## Exercise 10
+
+Description:
+
+```
+Fix the two bugs you found in Exercise 9, by copying whatever .py files you need to modify from the zoobar directory to zoobar-fixed and changing them there.
+```
+
+We need to first run the following command to get the bug reports.
+
+```bash
+script -c ./check-symex-zoobar.py
+```
+
+We will get the bug reports in typescript in html form.
+
+The zoobar theft bug occurs due to the negative number of requested zoobars, to fixed the bug, we add two lines in bank.py.
+
+zoobar/bank.py:
+
+```python
+def transfer(sender, recipient, zoobars):
+    persondb = person_setup()
+    senderp = persondb.query(Person).get(sender)
+    recipientp = persondb.query(Person).get(recipient)
+
+    if zoobars < 0:
+        zoobars = 0
+    ...
+```
+
+The balance mismatch bug occurs due to the condition where the sender and the recipient are the same. We also fix the bug in bank.py.
+
+zoobar/bank.py:
+
+```python
+def transfer(sender, recipient, zoobars):
+    ...
+
+    if sender == recipient:
+        sender_balance = senderp.zoobars
+        recipient_balance = recipientp.zoobars
+        
+    senderp.zoobars = sender_balance
+    recipientp.zoobars = recipient_balance
+    persondb.commit()
+```
+
+Now, run make check and you shall pass!!
