@@ -293,3 +293,337 @@ Description:
 ```
 Another major component in concolic execution is finding a concrete input for a constraint. Complete the implementation of concolic_find_input in symex/fuzzy.py and make sure you pass the second test case of symex/check-symex-int.py. For this exercise, you will have to invoke Z3, along the lines of (ok, model) = fork_and_check(constr) (see the comments in the code). 
 ```
+
+To finish this task, we need to read the comments on conclic_find_input() function in symex/fuzzy.py.
+
+symex/fuzzy.py:
+
+```python
+# Given a constraint, ask Z3 to compute concrete values that make that
+# constraint true. It returns a new ConcreteValues instance with those
+# values.  Z3 produces variables that don't show up in our
+# applications and in our constraints; we filter those by accepting
+# only variables names that appear in ok_names.
+def concolic_find_input(constraint, ok_names, verbose=0):
+  ## Invoke Z3, along the lines of:
+  ##
+  ##     (ok, model) = fork_and_check(constr)
+  ##
+  ## If Z3 was able to find example inputs that solve this
+  ## constraint (i.e., ok == z3.sat), make a new input set
+  ## containing the values from Z3's model, and return it.
+  return False, ConcreteValues()
+```
+
+We first focus on the comments inside the function body, i.e., the "Invoke..." comments. The comments guide us to use the 'fork_and_check()' function, which is also declared and implemented in symex/fuzzy.py.
+
+symex/fuzzy.py:
+```python
+def fork_and_check(constr):
+  constr = simplify(constr)
+
+  parent_conn, child_conn = multiprocessing.Pipe()
+  p = multiprocessing.Process(target=fork_and_check_worker,
+                              args=(constr, child_conn))
+  p.start()
+  child_conn.close()
+
+  ## timeout after a while..
+  def sighandler(signo, stack):
+    print("Timed out..")
+    # print z3expr(constr).sexpr()
+    p.terminate()
+
+  signal.signal(signal.SIGALRM, sighandler)
+  signal.alarm(z3_timeout)
+
+  try:
+    res = parent_conn.recv()
+  except EOFError:
+    res = (z3.unknown, None)
+  finally:
+    signal.alarm(0)
+
+  p.join()
+  return res
+
+def fork_and_check_worker(constr, conn):
+  s = z3.Solver()
+  s.add(z3expr(constr))
+  ok = s.check()
+  m = {}
+  if ok == z3.sat:
+    z3m = s.model()
+    for k in z3m:
+      v = z3m[k]
+      if v.sort() == z3.IntSort():
+        m[str(k)] = v.as_long()
+      elif v.sort() == z3.StringSort():
+        ## There doesn't seem to be a way to get the raw string
+        ## value out of Z3..  Instead, we get the escaped string
+        ## value.  We need to jump through hoops to unescape it.
+        x = v.as_string()
+        u = x.encode('latin1').decode('unicode-escape')
+        m[str(k)] = u
+      else:
+        raise Exception("Unknown sort for %s=%s: %s" % (k, v, v.sort()))
+  conn.send((ok, m))
+  conn.close()
+```
+
+Well, though this function looks a bit complex, the major work of fork_and_check() is done by the fork_and_check_worker(). Thus, looking at the first few lines of the latter helps us get the main role of this function: given the constraint as specified in the parameter 'constr', the function use the z3 solver to get a model under this constraint, which is later returned. (Note here, the model given by z3 is dict-like, i.e., key-value structure. Knowing this helps our coding afterwards)
+
+All right, now we have know how fork_and_check()  works. We can now start coding.
+
+symex/fuzzy.py:
+
+```python
+def concolic_find_input(constraint, ok_names, verbose=0):
+  (ok, model) = fork_and_check(constraint)
+  if ok == z3.sat:
+    concrete_values = ConcreteValues()
+    for key in model:
+      ## filtering
+      if ok_names is None or key in ok_names:
+        concrete_values.add(key,model[key])
+    return True, concrete_values
+
+  return False, ConcreteValues()
+```
+
+## Exercise 5
+
+Description:
+
+```
+A final major component in concolic execution is exploring different branches of execution. Complete the implementation of concolic_force_branch in symex/fuzzy.py and make sure you pass the final test case of symex/check-symex-int.py. 
+```
+
+Also, read the comments in concolic_force_branch() carefully before getting down to work.
+
+symex/fuzzy.py:
+
+```python
+# Compute a new constraint by negating the branch condition of the
+# b-th branch in branch_conds. This constraint can be used to force
+# the concolic execution to explore the other side of branch b.
+def concolic_force_branch(b, branch_conds, branch_callers, verbose = 1):
+  ## Compute an AST expression for the constraints necessary
+  ## to go the other way on branch b.  You can use existing
+  ## logical AST combinators like sym_not(), sym_and(), etc.
+  ##
+  ## Note that some of the AST combinators take separate positional
+  ## arguments. In Python, to unpack a list into separate positional
+  ## arguments, use the '*' operator documented at
+  ## https://docs.python.org/3/tutorial/controlflow.html#unpacking-argument-lists
+```
+
+The task given can be divided into following steps:
+
+1. negate the b-th branch condition
+2. keep other branch conditions consistent
+3. give out the constraint
+
+For example, if the branch conditions are A, B and C, to force a new branch condition by negating only one branch condition, we will get -A, B and C (suppose we negate the first branch condition). Therefore, the logical expression of such new constraint is -A & B & C. Now, let's start coding.
+
+symex/fuzzy.py:
+
+```python
+def concolic_force_branch(b, branch_conds, branch_callers, verbose = 1):
+  sym_branch = branch_conds[b]
+  constraint = None
+  constraint_list = []
+  for branch_cond in branch_conds:
+    if branch_cond == sym_branch:
+      constraint_list.append(sym_not(branch_cond))
+    else:
+      constraint_list.append(branch_cond)
+  constraint = sym_and(*constraint_list)
+
+
+  if verbose > 2:
+    callers = branch_callers[b]
+    print('Trying to branch at %s:%d:' % (callers[0], callers[1]))
+    if constraint is not None:
+      print(indent(z3expr(constraint).sexpr()))
+
+  if constraint is None:
+    return const_bool(True)
+  else:
+    return constraint
+```
+
+## Exercise 6
+
+Description:
+
+```
+Now implement concolic execution of a function in concolic_execs() in symex/fuzzy.py. The goal is to eventually cause every every branch of functo be executed. Read the comment for a proposed plan of attack for implementing that loop
+```
+
+Before we get to trying to solve this exercise, reviewing what we have actually done helps a lot.
+
+In exercise 3, we completed the implementation of the concolic_exec_input() function.
+
+```python
+def concolic_exec_input(testfunc, concrete_values, verbose = 0):
+    ...
+    return (v, cur_path_constr, cur_path_constr_callers)
+```
+
+This function takes three parameters as inputs: testfunc, which is the function to be executed and tested; concrete_values, the concrete values to be used in the execution of the testfunc. And it returns the output value of the testfunc, along with path constraints and the corresponding callers.
+
+Thus, this function executes the function we what to test with the given concrete values.
+
+In exercise 4, we implemented the concolic_find_input() function.
+
+```python
+def concolic_find_input(constraint, ok_names, verbose=0):
+  ...
+  return True, concrete_values
+```
+
+We can easily tell that this function tries to find concrete values under the constraint and filter the given concrete values with ok_names (i.e., only those variables whose names are in ok_names are accepted and returned).
+
+In exercise 5, we implemented the concolic_force_branch() function.
+
+```python
+def concolic_force_branch(b, branch_conds, branch_callers, verbose = 1):
+  ...
+  return constraint
+```
+
+This function negates the branch conditions to find more constraints, which is to say, explore more possible paths.
+
+OK, we have nearly gotten everything we need to implement a concolic execution system. A concolic/symbolic execution requires following steps:
+
+1. use some concrete values to explore some paths (i.e., constraints)
+2. given these paths along with their negated paths, symbolically explore them and tries to get more constraints
+3. given these constraints, try to find the concrete values to satisfy the constraints and append these values to input list
+4. use concrete values from the input list to go down these paths and explore more paths
+
+Thus, it is easy to implement this strategy with the functions above:
+
+1. use concolic_exec_input() to get some constraints
+2. use concolic_force_branch() to explore more constraints
+3. use concolic_find_input() to find more concrete values that satisfy these constraints
+4. repeat
+
+This is just as commented in the concolic_execs() function. Now we can start coding:
+
+symex/fuzzy.py:
+
+```python
+def concolic_execs(func, maxiter = 100, verbose = 0):
+  ## "checked" is the set of constraints we already sent to Z3 for
+  ## checking.  use this to eliminate duplicate paths.
+  checked = set()
+
+  ## output values
+  outs = []
+
+  ## list of inputs we should try to explore.
+  inputs = InputQueue()
+
+  iter = 0
+  while iter < maxiter and not inputs.empty():
+    iter += 1
+    concrete_values = inputs.get()
+    (r, branch_conds, branch_callers) = concolic_exec_input(func, concrete_values, verbose)
+    if r not in outs:
+      outs.append(r)
+    
+    branch_len = len(branch_conds)
+    for k in range(branch_len):
+      constraint = concolic_force_branch(k, branch_conds, branch_callers)
+      if constraint in checked:
+        continue
+      else:
+        checked.add(constraint)
+        (ok, cur_concrete_values) = concolic_find_input(constraint, None)
+        if ok:
+          cur_concrete_values.inherit(concrete_values)
+          inputs.add(cur_concrete_values, branch_callers[k])
+
+  if verbose > 0:
+    print('Stopping after', iter, 'iterations')
+
+  return outs
+```
+
+## Exercise 7 and 8
+
+Exercise 7 description:
+
+```
+Finish the implementation of concolic execution for strings and byte-arrays in symex/fuzzy.py. We left out support for two operations on concolic_str and concolic_bytes objects. The first is computing the length of a string, and the second is checking whether a particular string a appears in string b (i.e., a is contained in b, the underlying implementation of Python's "a in b" construct).
+```
+
+Exercise 8 description:
+
+```
+Figure out how to handle the SQL database so that the concolic engine can create constraints against the data returned by the database. To help you do this, we've written an empty wrapper around the sqlalchemy get method, in symex/symsql.py. Implement this wrapper so that concolic execution can try all possible records in a database. Examine ./check-symex-sql.py to see how we are thinking of performing database lookups on concolic values.
+```
+
+Both exercises are preparing for the following exercises and are pretty easy. Just cut all the crap and list the codes below:
+
+Exercise 7:
+
+symex/fuzzy.py:
+
+```python
+class concolic_str(str):
+    ## Exercise 7: your code here.
+    ## Implement symbolic versions of string length (override __len__)
+    ## and contains (override __contains__).
+
+    def __len__(self):
+        res = len(self.__v)
+        return concolic_int(sym_length(ast(self)),res)
+
+    def __contains__(self, o):
+        if isinstance(o, concolic_str):
+        res = o.__v in self.__v
+        else:
+        res = o in self.__v
+        return concolic_bool(sym_contains(ast(self), ast(o)), res)
+
+class concolic_bytes(bytes):
+    ## Exercise 7: your code here.
+    ## Implement symbolic versions of bytes length (override __len__)
+    ## and contains (override __contains__).
+
+    def __len__(self):
+        res = len(self.__v)
+        return concolic_int(sym_length(ast(self)), res)
+    
+    def __contains__(self, o):
+        if isinstance(o, concolic_bytes):
+        res = o.__v in self.__v
+        else:
+        res = o in self.__v
+        return concolic_bool(sym_contains(ast(self), ast(o)), res)
+```
+
+Exercise 8:
+
+symex/symsql.py:
+
+```python
+def newget(query, primary_key):
+  ## Exercise 8: your code here.
+  ##
+  ## Find the object with the primary key "primary_key" in SQLalchemy
+  ## query object "query", and do so in a symbolic-friendly way.
+  ##
+  ## Hint: given a SQLalchemy row object r, you can find the name of
+  ## its primary key using r.__table__.primary_key.columns.keys()[0]
+  query_row = query.all()
+  for row in query_row:
+    row_key = getattr(row, row.__table__.primary_key.columns.keys()[0])
+    if row_key == primary_key:
+      return row
+  return None
+```
+
+## Exercise 9
