@@ -184,3 +184,112 @@ class concolic_int(int):
 To successfully fix the second part, we need to refer to the [Python document](https://docs.python.org/3/library/operator.html) to see what to implement for multiplication and division. Note that there are two division operations in python, i.e., truediv() and floordiv(), which refer to the operators '/' and '//' respectively. But because z3 only supports the floordiv() for symbolic execution, we should only implement the floordiv() operation here.
 
 ## Exercise 3
+
+Description:
+
+```
+An important component of concolic execution is concolic_exec_input() in symex/fuzzy.py. We have given you the implementation. You will use it to build a complete concolic execution system. To understand how to use concolic_exec_input(), you should create an input such that you pass the first check in symex/check-symex-int.py. Don't modify symex/check-symex-int.py directly, but instead modify symex_exercises.py. 
+```
+
+This exercise is easy, but it provides a foundation for the following exercises because it requires us to understand the logic behind the 'concolic_exec_input()' function.
+
+First, from check-symex-int.py, we can tell that it calls the fuzzy.concolic_exec_input() function.
+
+check-symex-int.py:
+
+```python
+(r, constr, callers) = fuzzy.concolic_exec_input(test_f, v, verbose=1)
+```
+
+Let's take a look at the concolic_exec_input() in fuzzy.py:
+
+symex/fuzzy.py:
+
+```python
+def concolic_exec_input(testfunc, concrete_values, verbose = 0):
+  global cur_path_constr, cur_path_constr_callers
+  cur_path_constr = []
+  cur_path_constr_callers = []
+    
+  if verbose > 0:
+    print('Trying concrete value:', concrete_values)
+
+  # make the concrete_value global so that new variables created
+  # by testfunc(), directly or indirectly, will be added to
+  # concrete_values.
+  concrete_values.mk_global()
+  v = testfunc()
+
+  if verbose > 1:
+    print('Test generated', len(cur_path_constr), 'branches:')
+    for (c, caller) in zip(cur_path_constr, cur_path_constr_callers):
+      print(indent(z3expr(c)), '@', '%s:%d' % (caller[0], caller[1]))
+
+  return (v, cur_path_constr, cur_path_constr_callers)
+```
+
+Well, a quick glance at this function tells us that this function executes the 'testfunc()' and return its output, as well as the two global variables. A more careful look reveals that 
+
+```python
+concrete_values.mk_global()
+```
+
+makes the input 'concrete_values' global. And since the testfunc() may execute with variables in the global concrete_values, it is now clear that the input parameter 'concrete_values' should be the concrete values we want the 'testfunc()' to execute and test. 
+
+Now let us move back to check-symex-int.py,
+
+check-symex-int.py:
+
+```python
+def f(x):
+    if x == 7:
+        return 100
+    if x*2 == x+1:
+        return 70
+    if x > 2000:
+        return 80
+    if x*2 == 1000:
+        return 30000
+    if x < 500:
+        return 33
+    if x // 123 == 7:
+        return 1234
+    return 40
+
+def test_f():
+    i = fuzzy.mk_int('i', 0)
+    v = f(i)
+    return v
+
+## This test case checks that you provided the right input in symex_exercises.
+print('Calling f with a specific input..')
+v = symex_exercises.make_a_test_case()
+(r, constr, callers) = fuzzy.concolic_exec_input(test_f, v, verbose=1)
+if r == 1234:
+    print("Found input for 1234")
+else:
+    print("Input produced", r, "instead of 1234")
+```
+
+The codes shown above are now clear. fuzzy.concolic_exec_input() executes the 'test_f()' function along with the 'v' variable derived from the 'symex_exercises.make_a_test_case()', which is our target function to implement. And in the 'test_f()' function, the symbolic variable is 'i', and symbolically executing 'i' should return the output of 1234, as indicated by the 'if r == 1234' line of code. Therefore, our implementation of 'symex_exercises.make_a_test_case()' should give out a concrete value of symbolic value 'i' that lets 'test_f()' output 1234
+
+symex_exercises.py:
+
+```python
+import symex.fuzzy as fuzzy
+
+def make_a_test_case():
+  concrete_values = fuzzy.ConcreteValues()
+  ## Your solution here: add the right value to concrete_values
+  concrete_values.add('i', 7*123)
+  return concrete_values
+
+```
+
+## Exercise 4
+
+Description:
+
+```
+Another major component in concolic execution is finding a concrete input for a constraint. Complete the implementation of concolic_find_input in symex/fuzzy.py and make sure you pass the second test case of symex/check-symex-int.py. For this exercise, you will have to invoke Z3, along the lines of (ok, model) = fork_and_check(constr) (see the comments in the code). 
+```
