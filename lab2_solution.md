@@ -1,6 +1,6 @@
 # Lab 2: Privilege separation and server-side sandboxing
 
-This is the solution to [Lab2](http://css.csail.mit.edu/6.858/2022/labs/lab2.html) of [MIT 6.858 Spring 2022](http://css.csail.mit.edu/6.858/2022/. 
+This is the solution to [Lab2](http://css.csail.mit.edu/6.858/2022/labs/lab2.html) of [MIT 6.858 Spring 2022](http://css.csail.mit.edu/6.858/2022/). 
 
 **!!!Important note for self-paced learners**: for any of you who try to work out the labs of Spring 2022 after July 2022, because Ubuntu 21.10 is no longer supported after July 2022 and the labs of Spring 2022 are deployed in Ubuntu 21.10, there are some fatal bugs in these labs and you need to follow the instructions below to fix the bugs in the labs.
 
